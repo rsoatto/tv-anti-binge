@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>BingeBreak settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main>
+    <h1>BingeBreak</h1>
+    <p class="explain">
+      BingeBreak finds the natural stopping point <em>inside</em> an episode —
+      the real scene break right before the closing hook — and pauses the
+      player there. It runs entirely on your machine: no accounts, no API
+      keys, no LLM calls.
+    </p>
+
+    <h2>How the stop point is found</h2>
+    <ol class="explain">
+      <li><strong>Timestamps</strong> come from the episode's own captions —
+        read from the player when it exposes them, or from a subtitle file
+        (.srt/.vtt) you pick. Long dialogue silences mark real scene breaks.</li>
+      <li><strong>Plot</strong> comes from known summaries: the episode's
+        Wikipedia article (Plot section) when one exists, otherwise the TVMaze
+        synopsis.</li>
+      <li>The summary's beats are aligned to the scenes (plot order matches
+        screen order), locating where the <em>closing</em> beat starts. The
+        stop point is the measured scene break just before it — never a fixed
+        “N minutes before the end”.</li>
+    </ol>
+
+    <h2>Privacy</h2>
+    <p class="explain">
+      Network requests go only to <code>api.tvmaze.com</code> and
+      <code>en.wikipedia.org</code> (episode lookups). Captions are analyzed
+      locally and never uploaded. Results cache in
+      <code>chrome.storage.local</code>.
+    </p>
+
+    <div class="buttons">
+      <button id="clear-cache">Clear cached lookups</button>
+      <button id="disarm">Disarm tonight's guard</button>
+    </div>
+    <div id="status" hidden></div>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

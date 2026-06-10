@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Node (no deps yet, but keep clean if any are ever installed)
+node_modules/
+
+# Chrome-generated artifacts inside the unpacked extension
+extension/_metadata/

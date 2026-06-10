@@ -1,0 +1,79 @@
+{
+  "manifest_version": 3,
+  "name": "BingeBreak",
+  "version": "0.2.0",
+  "description": "Spoiler-free in-episode stopping points — pause right after the story lands, before the cliffhanger hook.",
+  "permissions": ["storage", "activeTab", "scripting", "declarativeNetRequest"],
+  "host_permissions": [
+    "https://api.tvmaze.com/*",
+    "https://en.wikipedia.org/*",
+    "https://api.gestdown.info/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ollama-origin",
+        "enabled": true,
+        "path": "dnr_rules.json"
+      }
+    ]
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.netflix.com/*",
+        "https://*.hulu.com/*",
+        "https://*.disneyplus.com/*",
+        "https://*.max.com/*",
+        "https://*.hbomax.com/*",
+        "https://*.primevideo.com/*",
+        "https://*.amazon.com/*",
+        "https://*.crunchyroll.com/*",
+        "https://*.paramountplus.com/*",
+        "https://*.peacocktv.com/*",
+        "https://tv.apple.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["lib/guard.js", "lib/detect.js"],
+      "matches": [
+        "https://*.netflix.com/*",
+        "https://*.hulu.com/*",
+        "https://*.disneyplus.com/*",
+        "https://*.max.com/*",
+        "https://*.hbomax.com/*",
+        "https://*.primevideo.com/*",
+        "https://*.amazon.com/*",
+        "https://*.crunchyroll.com/*",
+        "https://*.paramountplus.com/*",
+        "https://*.peacocktv.com/*",
+        "https://tv.apple.com/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "options/options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
