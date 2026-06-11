@@ -147,8 +147,38 @@ async function handleStopPoint({
     try {
       if (!embedTextsImpl) throw new EmbedUnavailable("embedding engine not loaded");
       onProgress("Matching plot to scenes (on-device model)…", 70);
-      const all = await embedTextsImpl([...beats, ...scenes.map((s) => s.text)], {
-        onProgress: (label) => onProgress(label, 72),
+      // Stall watchdog: if the engine makes no progress for 60s (dead
+      // download, wedged runtime), give up and fall back to lexical —
+      // a hang is never an acceptable outcome.
+      const texts = [...beats, ...scenes.map((s) => s.text)];
+      const all = await new Promise((resolve, reject) => {
+        let timer;
+        const arm = () => {
+          clearTimeout(timer);
+          timer = setTimeout(
+            () =>
+              reject(
+                new EmbedUnavailable("embedding timed out (no progress for 60s)")
+              ),
+            60000
+          );
+        };
+        arm();
+        embedTextsImpl(texts, {
+          onProgress: (label) => {
+            arm();
+            onProgress(label, 72);
+          },
+        }).then(
+          (v) => {
+            clearTimeout(timer);
+            resolve(v);
+          },
+          (e) => {
+            clearTimeout(timer);
+            reject(e);
+          }
+        );
       });
       vectors = {
         beatVecs: all.slice(0, beats.length),

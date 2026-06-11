@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h3>embed engine test (patched vendor, wasmBinary path — mirrors embed-engine.js)</h3>
+<div id="log"></div>
+<script type="module">
+const log = (m) => {
+  document.getElementById("log").innerHTML += m + "<br>";
+  console.log("[TEST]", m);
+};
+window.addEventListener("unhandledrejection", (e) => log("UNHANDLED: " + e.reason?.message));
+window.addEventListener("error", (e) => log("WINDOW ERROR: " + e.message));
+try {
+  log("importing patched bundle…");
+  const { pipeline, env } = await import("./vendor/transformers.web.min.js");
+  log("bundle imported OK");
+  env.backends.onnx.wasm.numThreads = 1;
+  env.backends.onnx.wasm.proxy = false;
+  env.allowLocalModels = false;
+  const wasmResp = await fetch("./vendor/ort-wasm-simd-threaded.wasm");
+  env.backends.onnx.wasm.wasmBinary = await wasmResp.arrayBuffer();
+  log("wasm binary loaded: " + env.backends.onnx.wasm.wasmBinary.byteLength + " bytes");
+  const t0 = performance.now();
+  let lastPct = -1;
+  const extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
+    dtype: "q8",
+    progress_callback: (i) => {
+      if (i.status === "progress" && i.progress != null) {
+        const pct = Math.round(i.progress);
+        if (pct !== lastPct) { lastPct = pct; log(`download ${i.file}: ${pct}% (${i.loaded}/${i.total})`); }
+      } else if (i.status) {
+        log(`event: ${i.status} ${i.file || i.name || ""}`);
+      }
+    },
+  });
+  log(`pipeline ready in ${Math.round(performance.now() - t0)}ms`);
+  const t1 = performance.now();
+  const out = await extractor(["hello there", "general kenobi", "a third sentence"], { pooling: "mean", normalize: true });
+  log(`embedded 3 texts in ${Math.round(performance.now() - t1)}ms, dims=${out.dims.join("x")}`);
+  log("ALL OK");
+} catch (e) {
+  log("ERROR: " + (e && e.message));
+  console.error(e);
+}
+</script>
+</body>
+</html>

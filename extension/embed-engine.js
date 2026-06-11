@@ -1,33 +1,42 @@
 // In-extension embedding engine (service-worker only).
 //
-// Uses the bundled transformers.js web build (vendor/transformers.web.min.js
-// — the `.web` variant statically includes the ONNX runtime loader; MV3
-// service workers forbid dynamic import(), which the standard build uses).
-// Model weights (~25 MB quantized) are fetched from the Hugging Face Hub on
-// first use and cached by the browser; the WASM runtime is bundled. No
-// servers, no accounts, no API keys; texts never leave the machine.
+// vendor/ holds transformers' `.web` build with its bare ORT specifiers
+// rewritten to the vendored ort.bundle (see scripts/vendorize.mjs) — the
+// only combination that is fully statically resolvable, which MV3 service
+// workers require (no dynamic import(), no bare specifiers). The WASM
+// binary is passed directly via wasmBinary so ORT's external-loader
+// fallback (a dynamic import) never executes. Model weights (~25 MB
+// quantized) are fetched from the Hugging Face Hub on first use and cached
+// by the browser. No servers, no accounts, no API keys; texts never leave
+// the machine.
 
 import { pipeline, env } from "./vendor/transformers.web.min.js";
 import { EMBED_MODEL, MAX_CHARS, EmbedUnavailable } from "./lib/embed.js";
 
-env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("vendor/");
 env.backends.onnx.wasm.numThreads = 1; // SW cannot spawn the runtime's workers
+env.backends.onnx.wasm.proxy = false;
 env.allowLocalModels = false;
 
 let extractorPromise = null;
 
 function getExtractor(onProgress) {
   if (!extractorPromise) {
-    extractorPromise = pipeline("feature-extraction", EMBED_MODEL, {
-      dtype: "q8",
-      progress_callback: (info) => {
-        if (info.status === "progress" && info.progress != null) {
-          onProgress?.(
-            `Downloading matching model (first run): ${Math.round(info.progress)}%`
-          );
-        }
-      },
-    });
+    extractorPromise = (async () => {
+      const wasmResp = await fetch(
+        chrome.runtime.getURL("vendor/ort-wasm-simd-threaded.wasm")
+      );
+      env.backends.onnx.wasm.wasmBinary = await wasmResp.arrayBuffer();
+      return pipeline("feature-extraction", EMBED_MODEL, {
+        dtype: "q8",
+        progress_callback: (info) => {
+          if (info.status === "progress" && info.progress != null) {
+            onProgress?.(
+              `Downloading matching model (first run): ${Math.round(info.progress)}%`
+            );
+          }
+        },
+      });
+    })();
     // A failed download must not poison future attempts.
     extractorPromise.catch(() => {
       extractorPromise = null;

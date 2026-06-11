@@ -186,9 +186,35 @@ function getCuesFromFile() {
 function runStopPoint(payload, onProgress) {
   return new Promise((resolve, reject) => {
     const port = chrome.runtime.connect({ name: "stoppoint" });
+    // Popup-side stall watchdog: whatever happens in the worker, the UI must
+    // never sit on a frozen progress bar. Reset on every message.
+    let timer;
+    const fail = (message) => {
+      clearTimeout(timer);
+      try {
+        port.disconnect();
+      } catch {
+        // already gone
+      }
+      reject(new Error(message));
+    };
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(
+        () =>
+          fail(
+            "The analysis worker stopped responding. Reload the extension " +
+              "(chrome://extensions) and try again."
+          ),
+        45000
+      );
+    };
+    arm();
     port.onMessage.addListener((msg) => {
+      arm();
       if (msg.progress) onProgress(msg.progress, msg.pct ?? 50);
       if (msg.done) {
+        clearTimeout(timer);
         port.disconnect();
         if (msg.error) {
           const err = new Error(msg.error);
@@ -200,7 +226,10 @@ function runStopPoint(payload, onProgress) {
       }
     });
     port.onDisconnect.addListener(() => {
-      reject(new Error("The analysis was interrupted — try again."));
+      fail(
+        "The analysis worker is unavailable — the extension may need a " +
+          "reload (chrome://extensions)."
+      );
     });
     port.postMessage(payload);
   });
