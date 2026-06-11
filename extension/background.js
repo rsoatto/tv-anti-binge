@@ -14,8 +14,15 @@ import * as wiki from "./lib/wiki.js";
 import { segmentScenes } from "./lib/scenes.js";
 import { splitBeats, alignBeatsToScenes, chooseStopPoint } from "./lib/align.js";
 import { buildPlan } from "./lib/planner.js";
-import { embedTexts, EMBED_MODEL, EmbedUnavailable } from "./lib/embed.js";
+import { EMBED_MODEL, EmbedUnavailable } from "./lib/embed.js";
 import { fetchSubtitles, SubtitlesUnavailable } from "./lib/subfetch.js";
+
+// The embedding engine is injected by sw.js (it imports the bundled
+// transformers.js, which node can't load — this module stays node-testable).
+let embedTextsImpl = null;
+export function setEmbedEngine(fn) {
+  embedTextsImpl = fn;
+}
 
 const SHOW_TTL_MS = 7 * 24 * 3600 * 1000;
 const WIKI_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -131,15 +138,18 @@ async function handleStopPoint({
 
   const beats = summaryText ? splitBeats(summaryText) : [];
 
-  // Semantic layer: a small local embedding model (Ollama) bridges the
-  // paraphrase gap between summary prose and dialogue. Optional — when the
-  // server isn't running we fall back to lexical matching and say so.
+  // Semantic layer: the bundled embedding model bridges the paraphrase gap
+  // between summary prose and dialogue. Falls back to lexical matching
+  // (and says so) if the model can't load — e.g. first run while offline.
   let vectors = null;
   let embedNote = "";
   if (beats.length) {
     try {
-      onProgress("Matching plot to scenes (local model)…", 75);
-      const all = await embedTexts([...beats, ...scenes.map((s) => s.text)]);
+      if (!embedTextsImpl) throw new EmbedUnavailable("embedding engine not loaded");
+      onProgress("Matching plot to scenes (on-device model)…", 70);
+      const all = await embedTextsImpl([...beats, ...scenes.map((s) => s.text)], {
+        onProgress: (label) => onProgress(label, 72),
+      });
       vectors = {
         beatVecs: all.slice(0, beats.length),
         sceneVecs: all.slice(beats.length),
@@ -174,7 +184,7 @@ async function handleStopPoint({
     captionSource,
     sceneCount: scenes.length,
     engine: vectors
-      ? `local embeddings (${EMBED_MODEL} via Ollama) + lexical`
+      ? `on-device embeddings (${EMBED_MODEL}, bundled) + lexical`
       : "lexical word-overlap",
     embedNote,
     candidates: stop.candidates.map((c) => ({

@@ -1,17 +1,31 @@
-// Live tests against the local Ollama server + nomic-embed-text.
-// Auto-skip when the server isn't running, so the suite stays green anywhere.
+// Live tests of the real embedding model — the same model/dtype the
+// extension bundles, run via the npm package (identical library version).
+// First run downloads ~25 MB of weights; auto-skips when that fails
+// (e.g. offline CI).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { embedTexts, embedServerUp } from "../lib/embed.js";
 import { segmentScenes } from "../lib/scenes.js";
 import {
   splitBeats,
   alignBeatsToScenes,
   chooseStopPoint,
 } from "../lib/align.js";
+import { EMBED_MODEL } from "../lib/embed.js";
 import { makeCues, SUMMARY, DURATION } from "./fixtures.mjs";
 
-const up = await embedServerUp();
+let extractor = null;
+try {
+  const { pipeline } = await import("@huggingface/transformers");
+  extractor = await pipeline("feature-extraction", EMBED_MODEL, { dtype: "q8" });
+} catch {
+  // model unavailable (offline / no dev deps) -> skip the live tests
+}
+const up = Boolean(extractor);
+
+async function embed(texts) {
+  const out = await extractor(texts, { pooling: "mean", normalize: true });
+  return out.tolist();
+}
 
 const PARAPHRASED =
   "A small-business owner fights to keep her struggling shop afloat as " +
@@ -25,7 +39,7 @@ const PARAPHRASED =
 async function alignWithModel(summary) {
   const scenes = segmentScenes(makeCues());
   const beats = splitBeats(summary);
-  const all = await embedTexts([...beats, ...scenes.map((s) => s.text)]);
+  const all = await embed([...beats, ...scenes.map((s) => s.text)]);
   const alignment = alignBeatsToScenes(beats, scenes, summary, {
     beatVecs: all.slice(0, beats.length),
     sceneVecs: all.slice(beats.length),
@@ -33,56 +47,38 @@ async function alignWithModel(summary) {
   return { scenes, alignment };
 }
 
-test("embedTexts returns one vector per input", { skip: !up }, async () => {
-  const vecs = await embedTexts(["hello there", "general kenobi"]);
-  assert.equal(vecs.length, 2);
-  assert.ok(vecs[0].length >= 256);
-  assert.equal(vecs[0].length, vecs[1].length);
+test("model rescues the zero-overlap paraphrase", { skip: !up }, async () => {
+  const { scenes, alignment } = await alignWithModel(PARAPHRASED);
+
+  // Lexical alone fails on this summary...
+  const lex = alignBeatsToScenes(splitBeats(PARAPHRASED), scenes, PARAPHRASED);
+  assert.equal(
+    chooseStopPoint({ scenes, alignment: lex, duration: DURATION }).basis,
+    "scene-break"
+  );
+
+  // ...the bundled model finds the right closing scene.
+  assert.equal(alignment.assignment.at(-1), 5);
+  assert.ok(alignment.evidenceOk, "semantic evidence should pass");
+  const stop = chooseStopPoint({ scenes, alignment, duration: DURATION });
+  assert.equal(stop.basis, "plot-aligned");
+  assert.ok(stop.stopAtSeconds >= 2300 && stop.stopAtSeconds <= 2320);
 });
 
-test(
-  "live model rescues the zero-overlap paraphrase (the LLM payoff)",
-  { skip: !up },
-  async () => {
-    const { scenes, alignment } = await alignWithModel(PARAPHRASED);
+test("model still refuses mismatched content", { skip: !up }, async () => {
+  const wrong =
+    "A submarine crew navigates a trench. The captain defuses a mutiny. " +
+    "A storm cripples the engines. They surface near a hostile fleet. " +
+    "The episode ends with torpedoes in the water.";
+  const { scenes, alignment } = await alignWithModel(wrong);
+  assert.equal(alignment.evidenceOk, false, "mean-margin gate must reject");
+  const stop = chooseStopPoint({ scenes, alignment, duration: DURATION });
+  assert.equal(stop.basis, "scene-break");
+});
 
-    // Lexical alone fails on this summary...
-    const lex = alignBeatsToScenes(splitBeats(PARAPHRASED), scenes, PARAPHRASED);
-    assert.equal(
-      chooseStopPoint({ scenes, alignment: lex, duration: DURATION }).basis,
-      "scene-break"
-    );
-
-    // ...the local model finds the right closing scene.
-    assert.equal(alignment.assignment.at(-1), 5);
-    assert.ok(alignment.evidenceOk, "semantic evidence should pass");
-    const stop = chooseStopPoint({ scenes, alignment, duration: DURATION });
-    assert.equal(stop.basis, "plot-aligned");
-    assert.ok(stop.stopAtSeconds >= 2300 && stop.stopAtSeconds <= 2320);
-  }
-);
-
-test(
-  "live model still refuses mismatched content",
-  { skip: !up },
-  async () => {
-    const wrong =
-      "A submarine crew navigates a trench. The captain defuses a mutiny. " +
-      "A storm cripples the engines. They surface near a hostile fleet. " +
-      "The episode ends with torpedoes in the water.";
-    const { scenes, alignment } = await alignWithModel(wrong);
-    const stop = chooseStopPoint({ scenes, alignment, duration: DURATION });
-    assert.equal(stop.basis, "scene-break");
-  }
-);
-
-test(
-  "matched original summary stays plot-aligned with the model on",
-  { skip: !up },
-  async () => {
-    const { scenes, alignment } = await alignWithModel(SUMMARY);
-    const stop = chooseStopPoint({ scenes, alignment, duration: DURATION });
-    assert.equal(stop.basis, "plot-aligned");
-    assert.ok(alignment.confidence > 0.5);
-  }
-);
+test("matched summary stays plot-aligned with the model on", { skip: !up }, async () => {
+  const { scenes, alignment } = await alignWithModel(SUMMARY);
+  const stop = chooseStopPoint({ scenes, alignment, duration: DURATION });
+  assert.equal(stop.basis, "plot-aligned");
+  assert.ok(alignment.confidence > 0.5);
+});

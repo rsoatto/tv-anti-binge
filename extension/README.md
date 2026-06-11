@@ -25,18 +25,21 @@ tokens**. Spoiler-free: only timestamps ever reach the UI, never plot text.
    ([lib/align.js](lib/align.js)). The stop point is the measured scene break
    just before it. Matching combines:
    - lexical overlap with rare-word/proper-noun weighting, and
-   - **semantic similarity from a small local embedding model**
-     (`nomic-embed-text` via [Ollama](https://ollama.com),
-     [lib/embed.js](lib/embed.js)) — this bridges the paraphrase gap
-     (summaries say "discovers the ledger", dialogue never does). Fully
-     on-device; nothing is uploaded, no API tokens of any kind.
+   - **semantic similarity from a bundled on-device embedding model**
+     (`all-MiniLM-L6-v2` quantized, run by transformers.js inside the
+     service worker — [embed-engine.js](embed-engine.js)). This bridges the
+     paraphrase gap (summaries say "discovers the ledger", dialogue never
+     does). The WASM runtime ships in `vendor/`; the ~25 MB weights download
+     once from the Hugging Face Hub and cache in the browser. Nothing is
+     uploaded, no servers, no accounts, no API tokens.
 4. If the alignment lacks evidence (short synopsis, weak match), the tool
    says so and falls back to the strongest *measured* scene break late in
    the episode — never an invented "N minutes before the end". Evidence
-   thresholds are calibrated from measurements, not guessed: on the test
-   fixture, a fully-paraphrased matching summary scores a semantic margin of
-   ~0.13–0.24 and mismatched content ~0.02; the gate sits at 0.07
-   (`SEM_MARGIN`, see tests/embed-live.test.mjs).
+   thresholds are calibrated from measurements, not guessed
+   ([scripts/calibrate-margins.mjs](scripts/calibrate-margins.mjs)): mean
+   assigned margin across beats measures 0.365 for a matched summary, 0.186
+   for a zero-word-overlap paraphrase, 0.046 for mismatched content — gated
+   at 0.10, with a 0.08 floor on the stop-placing final beat.
 
 ## Use
 
@@ -49,21 +52,17 @@ worker over a long-lived port. If every automatic caption source fails, an
 inline panel offers a subtitle-file picker — canceling it simply returns to
 idle. Then "Arm the guard" and go back to watching.
 
-## Local model (optional but recommended)
+## The on-device model
 
-Without Ollama running, alignment is lexical-only and works; with it,
-paraphrased summaries align correctly. Setup (once):
-
-```sh
-# Ollama.app is installed at ~/Applications (menu-bar app, starts at login)
-open ~/Applications/Ollama.app
-ollama pull nomic-embed-text   # 274 MB, runs in milliseconds on Apple Silicon
-```
-
-The extension rewrites its Origin header for `localhost:11434` via a
-declarativeNetRequest rule ([dnr_rules.json](dnr_rules.json)), so no
-`OLLAMA_ORIGINS` configuration is needed. The popup footer shows which
-matching engine was used for each result.
+No setup. The first "Find tonight's stop point" downloads the quantized
+model weights (~25 MB) from the Hugging Face Hub — progress is shown in the
+popup — and the browser caches them; afterwards it runs instantly and
+offline. If the first run happens offline, the result is computed
+lexical-only and labeled as such in the footer; the next online run picks
+the model up. MV3 notes: the service worker uses the `transformers.web`
+build (standard builds use dynamic `import()`, which service workers
+forbid), single-threaded WASM (workers can't spawn workers), and
+`wasm-unsafe-eval` CSP for WASM compilation.
 
 ## The guard
 
@@ -84,10 +83,10 @@ matching engine was used for each result.
 
 ## Privacy
 
-Network requests go only to `api.tvmaze.com` and `en.wikipedia.org` (episode
-metadata) and your own machine (`localhost:11434` for the local embedding
-model). Captions are analyzed locally and never uploaded. Lookups cache in
-`chrome.storage.local`.
+Network requests go only to `api.tvmaze.com` / `en.wikipedia.org` (episode
+metadata), `api.gestdown.info` (subtitle download), and `huggingface.co`
+(one-time model weights download). Captions are analyzed on-device and never
+uploaded. Lookups cache in `chrome.storage.local`.
 
 ## Tests
 

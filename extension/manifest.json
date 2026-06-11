@@ -1,27 +1,22 @@
 {
   "manifest_version": 3,
   "name": "BingeBreak",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Spoiler-free in-episode stopping points — pause right after the story lands, before the cliffhanger hook.",
-  "permissions": ["storage", "activeTab", "scripting", "declarativeNetRequest"],
+  "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": [
     "https://api.tvmaze.com/*",
     "https://en.wikipedia.org/*",
     "https://api.gestdown.info/*",
-    "http://localhost/*",
-    "http://127.0.0.1/*"
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*",
+    "https://*.hf.co/*"
   ],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "ollama-origin",
-        "enabled": true,
-        "path": "dnr_rules.json"
-      }
-    ]
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "sw.js",
     "type": "module"
   },
   "content_scripts": [

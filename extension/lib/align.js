@@ -50,15 +50,20 @@ export function splitBeats(summary) {
   return beats.slice(0, 60);
 }
 
-// Semantic-similarity contribution (when local embeddings are available).
+// Semantic-similarity contribution (when embedding vectors are available).
 // A beat's cosine against a scene is scored relative to that beat's mean
 // cosine over all scenes — absolute cosines vary by content, margins don't.
-// SEM_SCALE maps margins onto the lexical score scale; SEM_MARGIN is the
-// final-beat evidence threshold, calibrated against measured margins
-// (matched paraphrase ~0.10-0.25 vs mismatched content <0.05 with
-// nomic-embed-text — see tests/embed-live.test.mjs).
+// SEM_SCALE maps margins onto the lexical score scale.
+//
+// Evidence thresholds, calibrated against the bundled model
+// (all-MiniLM-L6-v2 q8, scripts/calibrate-margins.mjs): a single beat can
+// match noise (mismatched content measured last-beat margin 0.095!), but the
+// MEAN assigned margin across all beats separates cleanly — matched 0.365,
+// zero-word-overlap paraphrase 0.186, mismatched content 0.046. Gate on the
+// mean, with a modest floor on the final beat (it alone places the stop).
 const SEM_SCALE = 30;
-export const SEM_MARGIN = 0.07;
+export const SEM_MARGIN = 0.08; // final-beat floor
+export const SEM_MEAN_MARGIN = 0.1; // whole-alignment requirement
 
 // Monotonic beat->scene alignment. Returns {assignment: [sceneIndex per
 // beat], beatScores: [similarity per beat], confidence: 0..1, evidenceOk}
@@ -172,11 +177,16 @@ export function alignBeatsToScenes(
     if ((df.get(w) || 0) <= Math.max(2, Math.ceil(m / 4)) || names.has(w)) strong += 1;
   }
   const lexicalEvidence = matched >= 3 && strong >= 2;
-  // Semantic evidence: the final beat's ASSIGNED scene must beat that beat's
-  // average affinity by a calibrated margin.
-  const semanticEvidence = semMargin
-    ? semMargin[n - 1][assignment[n - 1]] >= SEM_MARGIN
-    : false;
+  // Semantic evidence: the whole alignment must beat per-beat average
+  // affinity by the calibrated mean margin, and the final beat (which alone
+  // places the stop) must clear its own floor.
+  let semanticEvidence = false;
+  if (semMargin) {
+    const assigned = assignment.map((sj, i) => semMargin[i][sj]);
+    const meanAssigned = assigned.reduce((a, b) => a + b, 0) / n;
+    semanticEvidence =
+      meanAssigned >= SEM_MEAN_MARGIN && assigned[n - 1] >= SEM_MARGIN;
+  }
   const evidenceOk = n >= 3 && (lexicalEvidence || semanticEvidence);
 
   return {

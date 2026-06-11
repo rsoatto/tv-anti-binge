@@ -119,8 +119,9 @@ globalThis.fetch = async (url) => {
 };
 
 let HANDLERS;
+let setEmbedEngine;
 before(async () => {
-  ({ HANDLERS } = await import("../background.js"));
+  ({ HANDLERS, setEmbedEngine } = await import("../background.js"));
 });
 
 test("stoppoint: plot-aligned stop from cues + wikipedia summary", async () => {
@@ -166,6 +167,43 @@ test("stoppoint: no cues -> auto-downloads subtitles, reports progress", async (
     episode: 1,
   });
   assert.match(again.captionSource, /cached/);
+});
+
+test("stoppoint: injected embedding engine reaches the result", async () => {
+  // Deterministic fake engine: orthogonal-ish vectors per text index so the
+  // semantic plumbing (slicing, threading into align) is exercised.
+  setEmbedEngine(async (texts) =>
+    texts.map((_, i) => {
+      const v = new Array(8).fill(0.1);
+      v[i % 8] = 1;
+      return v;
+    })
+  );
+  try {
+    const result = await HANDLERS.stoppoint({
+      query: "bakery noir",
+      season: 1,
+      episode: 1,
+      cues: makeCues(),
+      duration: 2520,
+    });
+    assert.match(result.engine, /on-device embeddings/);
+    assert.equal(result.embedNote, "");
+  } finally {
+    setEmbedEngine(null);
+  }
+});
+
+test("stoppoint: without an engine, lexical fallback is labeled", async () => {
+  const result = await HANDLERS.stoppoint({
+    query: "bakery noir",
+    season: 1,
+    episode: 1,
+    cues: makeCues(),
+    duration: 2520,
+  });
+  assert.equal(result.engine, "lexical word-overlap");
+  assert.match(result.embedNote, /engine not loaded/);
 });
 
 test("stoppoint: no cues anywhere -> SubtitlesUnavailable surfaces", async () => {
