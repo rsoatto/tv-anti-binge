@@ -13,3 +13,4 @@ node_modules/
 
 # Chrome-generated artifacts inside the unpacked extension
 extension/_metadata/
+dist/
